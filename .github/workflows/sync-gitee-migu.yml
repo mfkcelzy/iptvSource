@@ -22,15 +22,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      # 安装 jq 用于 JSON 解析
-      - name: Install jq
-        run: sudo apt-get install -y jq
-
       # 从 Gitee 下载并解析文件
       - name: Download and process files from Gitee
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: |
+          # 安装 jq
+          sudo apt-get update
+          sudo apt-get install -y jq
+          
           # 设置下载和解析函数
           download_and_decode() {
             local api_url=$1
@@ -42,7 +42,10 @@ jobs:
               echo "Attempt $attempt: Processing $output_file"
               
               # 使用 API 获取文件信息
-              if response=$(curl -sL -H "Authorization: token $GITEE_TOKEN" "$api_url"); then
+              response=$(curl -sL -H "Authorization: token $GITEE_TOKEN" "$api_url")
+              curl_exit_code=$?
+              
+              if [ $curl_exit_code -eq 0 ]; then
                 # 检查响应是否包含错误信息
                 if echo "$response" | jq -e '.message' > /dev/null 2>&1; then
                   error_msg=$(echo "$response" | jq -r '.message')
@@ -58,13 +61,14 @@ jobs:
                       return 0
                     else
                       echo "Decoded file is empty"
+                      rm -f "$output_file"
                     fi
                   else
                     echo "Failed to extract content from JSON response"
                   fi
                 fi
               else
-                echo "API request failed"
+                echo "API request failed with exit code: $curl_exit_code"
               fi
               
               echo "Processing failed, retrying in 5 seconds..."
@@ -92,10 +96,6 @@ jobs:
 
           echo "Files processed successfully:"
           ls -la migu.json miguepg.xml
-          echo "migu.json first line:"
-          head -1 migu.json
-          echo "miguepg.xml first line:"
-          head -1 miguepg.xml
 
       # 检查文件是否有变化
       - name: Check for changes
