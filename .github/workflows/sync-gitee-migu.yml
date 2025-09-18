@@ -1,97 +1,44 @@
-name: Sync Gitee Migu Files
-
-on:
-  schedule:
-    - cron: "0 */2 * * *"  # 每 2 小时同步一次
-  workflow_dispatch:       # 支持手动触发
-
-jobs:
-  sync-files:
-    runs-on: ubuntu-latest
-    steps:
-      # 检出 GitHub 仓库
-      - name: Checkout GitHub repo
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GH_PAT }}
-          fetch-depth: 0
-
-      # 配置 Git 用户信息
-      - name: Configure Git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      # 从 Gitee 下载文件（使用 raw 链接）
-      - name: Download files from Gitee
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-        run: |
-          # 设置下载重试机制
-          download_with_retry() {
-            local url=$1
-            local output=$2
-            local max_attempts=3
-            local attempt=1
-            
-            while [ $attempt -le $max_attempts ]; do
-              echo "Attempt $attempt: Downloading $output"
-              # 使用 token 认证下载文件
-              if curl -sL -H "Authorization: token $GITEE_TOKEN" -o "$output" "$url"; then
-                # 检查文件是否下载成功（非空且不是错误页面）
-                if [ -s "$output" ] && ! grep -q "error" "$output" 2>/dev/null; then
-                  echo "Successfully downloaded $output"
-                  return 0
-                else
-                  echo "Downloaded file is empty or contains error"
-                  rm -f "$output"
-                fi
-              fi
-              echo "Download failed, retrying in 5 seconds..."
-              sleep 5
-              attempt=$((attempt + 1))
-            done
-            echo "Failed to download $output after $max_attempts attempts"
-            return 1
-          }
-          
-          # 下载文件
-          download_with_retry "https://gitee.com/hxfrock/migu_video/raw/main/migu.json" "migu.json"
-          download_with_retry "https://gitee.com/hxfrock/migu_video/raw/main/miguepg.xml" "miguepg.xml"
-
-          # 验证文件是否下载成功
-          if [ ! -f "migu.json" ] || [ ! -s "migu.json" ]; then
-            echo "Error: migu.json download failed"
-            exit 1
+# 从 Gitee 下载文件（使用API方式）
+- name: Download files from Gitee via API
+  env:
+    GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+  run: |
+    # 安装 jq 用于 JSON 解析
+    sudo apt-get install -y jq
+    
+    download_via_api() {
+      local repo_owner="hxfrock"
+      local repo_name="migu_video"
+      local file_path=$1
+      local output_file=$2
+      local max_attempts=3
+      local attempt=1
+      
+      while [ $attempt -le $max_attempts ]; do
+        echo "Attempt $attempt: Downloading $file_path via API"
+        
+        # 使用 Gitee API 获取文件内容
+        api_url="https://gitee.com/api/v5/repos/$repo_owner/$repo_name/contents/$file_path"
+        
+        if response=$(curl -sL -H "Authorization: token $GITEE_TOKEN" "$api_url"); then
+          # 解析 JSON 并解码 base64 内容
+          content=$(echo "$response" | jq -r '.content' 2>/dev/null)
+          if [ "$content" != "null" ] && [ -n "$content" ]; then
+            echo "$content" | base64 -d > "$output_file"
+            if [ -s "$output_file" ]; then
+              echo "Successfully downloaded $output_file via API"
+              return 0
+            fi
           fi
-          
-          if [ ! -f "miguepg.xml" ] || [ ! -s "miguepg.xml" ]; then
-            echo "Error: miguepg.xml download failed"
-            exit 1
-          fi
-
-          echo "Files downloaded successfully:"
-          ls -la migu.json miguepg.xml
-
-      # 检查文件是否有变化
-      - name: Check for changes
-        id: check_changes
-        run: |
-          # 检查文件是否有修改
-          if git diff --quiet migu.json miguepg.xml; then
-            echo "No changes detected in files"
-            echo "changes=false" >> $GITHUB_OUTPUT
-          else
-            echo "Changes detected in files"
-            git add migu.json miguepg.xml
-            echo "changes=true" >> $GITHUB_OUTPUT
-          fi
-
-      # 提交并 push 到 GitHub（仅当文件有变化时）
-      - name: Commit and push changes
-        if: steps.check_changes.outputs.changes == 'true'
-        run: |
-          # 获取当前时间戳
-          current_time=$(date +'%Y-%m-%d %H:%M:%S')
-          git commit -m "chore: sync files from Gitee [$current_time]"
-          git push
+        fi
+        
+        echo "API download failed, retrying in 5 seconds..."
+        sleep 5
+        attempt=$((attempt + 1))
+      done
+      echo "Failed to download $output_file via API after $max_attempts attempts"
+      return 1
+    }
+    
+    download_via_api "migu.json" "migu.json"
+    download_via_api "miguepg.xml" "miguepg.xml"
