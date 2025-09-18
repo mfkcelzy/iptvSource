@@ -22,7 +22,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      # 从 Gitee 下载指定文件
+      # 从 Gitee 下载文件（使用 raw 链接）
       - name: Download files from Gitee
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
@@ -36,9 +36,16 @@ jobs:
             
             while [ $attempt -le $max_attempts ]; do
               echo "Attempt $attempt: Downloading $output"
+              # 使用 token 认证下载文件
               if curl -sL -H "Authorization: token $GITEE_TOKEN" -o "$output" "$url"; then
-                echo "Successfully downloaded $output"
-                return 0
+                # 检查文件是否下载成功（非空且不是错误页面）
+                if [ -s "$output" ] && ! grep -q "error" "$output" 2>/dev/null; then
+                  echo "Successfully downloaded $output"
+                  return 0
+                else
+                  echo "Downloaded file is empty or contains error"
+                  rm -f "$output"
+                fi
               fi
               echo "Download failed, retrying in 5 seconds..."
               sleep 5
@@ -49,25 +56,42 @@ jobs:
           }
           
           # 下载文件
-          download_with_retry "https://gitee.com/api/v5/repos/hxfrock/migu_video/contents/migu.json" "migu.json"
-          download_with_retry "https://gitee.com/api/v5/repos/hxfrock/migu_video/contents/miguepg.xml" "miguepg.xml"
+          download_with_retry "https://gitee.com/hxfrock/migu_video/raw/main/migu.json" "migu.json"
+          download_with_retry "https://gitee.com/hxfrock/migu_video/raw/main/miguepg.xml" "miguepg.xml"
+
+          # 验证文件是否下载成功
+          if [ ! -f "migu.json" ] || [ ! -s "migu.json" ]; then
+            echo "Error: migu.json download failed"
+            exit 1
+          fi
+          
+          if [ ! -f "miguepg.xml" ] || [ ! -s "miguepg.xml" ]; then
+            echo "Error: miguepg.xml download failed"
+            exit 1
+          fi
+
+          echo "Files downloaded successfully:"
+          ls -la migu.json miguepg.xml
 
       # 检查文件是否有变化
       - name: Check for changes
         id: check_changes
         run: |
-          git add migu.json miguepg.xml
-          if git diff --staged --quiet; then
+          # 检查文件是否有修改
+          if git diff --quiet migu.json miguepg.xml; then
+            echo "No changes detected in files"
             echo "changes=false" >> $GITHUB_OUTPUT
-            echo "No changes detected"
           else
+            echo "Changes detected in files"
+            git add migu.json miguepg.xml
             echo "changes=true" >> $GITHUB_OUTPUT
-            echo "Changes detected"
           fi
 
       # 提交并 push 到 GitHub（仅当文件有变化时）
       - name: Commit and push changes
         if: steps.check_changes.outputs.changes == 'true'
         run: |
-          git commit -m "chore: sync files from Gitee [$(date +'%Y-%m-%d %H:%M')]"
+          # 获取当前时间戳
+          current_time=$(date +'%Y-%m-%d %H:%M:%S')
+          git commit -m "chore: sync files from Gitee [$current_time]"
           git push
