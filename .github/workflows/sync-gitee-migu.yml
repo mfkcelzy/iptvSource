@@ -1,4 +1,4 @@
-name: Sync Gitee Files (Lightweight)
+name: Sync Gitee Migu Files (Lightweight)
 
 on:
   schedule:
@@ -23,8 +23,8 @@ jobs:
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: |
-          curl -sL -o migu.json "https://$GITEE_TOKEN@gitee.com/hxfrock/iptv/raw/main/migu.json"
-          curl -sL -o miguepg.xml "https://$GITEE_TOKEN@gitee.com/hxfrock/iptv/raw/main/miguepg.xml"
+          curl -sL -o migu.json "https://$GITEE_TOKEN@gitee.com/hxfrock/migu_video/raw/main/migu.json"
+          curl -sL -o miguepg.xml "https://$GITEE_TOKEN@gitee.com/hxfrock/migu_video/raw/main/miguepg.xml"
 
       - name: Commit and push to GitHub
         run: |
