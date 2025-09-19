@@ -2,18 +2,18 @@ name: Sync migu EPG XML
 
 on:
   schedule:
-    - cron: '0 * * * *' # 每小时执行一次 UTC，对应北京时间每小时整点
-  workflow_dispatch: # 可以手动触发
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
 jobs:
   sync-epg:
     runs-on: ubuntu-latest
     steps:
-      # 1️⃣ 拉取仓库代码
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
 
-      # 2️⃣ 下载 EPG XML
       - name: Download EPG XML
         run: |
           curl -sSL -o miguepg.xml https://raw.githubusercontent.com/develop202/migu_video/refs/heads/main/playback.xml
@@ -22,12 +22,10 @@ jobs:
             exit 1
           fi
 
-      # 3️⃣ 自动修改 XML 开头 <tv> 标签
       - name: Modify <tv> tag
         run: |
           sed -i 's|<tv generator-info-name="Tak" generator-info-url="https://github.com/develop202/migu_video/">|<tv generator-info-name="Migu" generator-info-url="https://mytveo.hxfkof.ggff.net/?proxy=true">|' miguepg.xml
 
-      # 4️⃣ 提交并推送，如果文件有变化
       - name: Commit & Push if changed
         run: |
           git config user.name "github-actions"
@@ -36,7 +34,7 @@ jobs:
           if ! git diff --cached --quiet; then
             NOW=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
             git commit -m "Update miguepg.xml - $NOW"
-            git push
+            git push https://x-access-token:${{ secrets.GH_PAT }}@github.com/hxfkofoutlook/iptv.git main
           else
             echo "No changes to commit"
           fi
