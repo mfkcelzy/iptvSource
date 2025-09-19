@@ -14,52 +14,84 @@ jobs:
         with:
           token: ${{ secrets.GH_PAT }}
 
-      - name: Download and process
+      - name: Download interface.txt
         run: |
-          # 下载文件
           curl -sSL -o interface.txt "https://raw.githubusercontent.com/develop202/migu_video/refs/heads/main/interface.txt"
-          
-          # 处理文件并生成 JSON
-          echo "{" > migu.json
-          first=true
-          while IFS= read -r line; do
-            # 提取 svg-name
-            if [[ $line == *"svg-name="* ]]; then
-              name=$(echo "$line" | grep -o 'svg-name="[^"]*"' | cut -d'"' -f2)
-            fi
-            # 提取 URL
-            if [[ $line == http* ]]; then
-              if [ ! -z "$name" ]; then
-                if [ "$first" = false ]; then
-                  echo "," >> migu.json
-                fi
-                echo "  \"$name\": \"$line\"" >> migu.json
-                first=false
-                name=""
-              fi
-            fi
-          done < interface.txt
-          echo "}" >> migu.json
-
-      - name: Validate and commit
-        run: |
-          # 安装 jq 验证 JSON
-          sudo apt-get install -y jq
-          
-          # 验证 JSON
-          if jq empty migu.json; then
-            echo "JSON 验证成功"
-            git config user.name "github-actions"
-            git config user.email "github-actions@github.com"
-            git add migu.json
-            if ! git diff --cached --quiet; then
-              git commit -m "Update migu.json $(date '+%Y-%m-%d %H:%M:%S')"
-              git push origin main
-            fi
-          else
-            echo "JSON 验证失败"
+          if [ ! -s interface.txt ]; then
+            echo "Failed to download interface.txt"
             exit 1
           fi
+          echo "Downloaded interface.txt successfully"
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Convert M3U to JSON
+        run: |
+          # 开始生成 JSON
+          echo "{" > migu.json
+          first_entry=true
+          current_name=""
+
+          while IFS= read -r line; do
+            # 跳过 M3U 头信息
+            if [[ "$line" == "#EXTM3U"* ]]; then
+              continue
+            fi
+
+            # 提取频道名称 (svg-name)
+            if [[ "$line" == "#EXTINF:"* && "$line" == *"svg-name="* ]]; then
+              current_name=$(echo "$line" | grep -o 'svg-name="[^"]*"' | cut -d'"' -f2)
+            fi
+
+            # 提取 URL 并写入 JSON
+            if [[ "$line" == http* ]] && [[ -n "$current_name" ]]; then
+              if [ "$first_entry" = false ]; then
+                echo "," >> migu.json
+              fi
+              # 对频道名称进行转义（处理特殊字符）
+              escaped_name=$(echo "$current_name" | sed 's/"/\\"/g')
+              echo "  \"$escaped_name\": \"$line\"" >> migu.json
+              first_entry=false
+              current_name=""
+            fi
+          done < interface.txt
+
+          echo "}" >> migu.json
+
+          echo "Conversion completed"
+
+      - name: Validate JSON
+        run: |
+          echo "Validating JSON format..."
+          if jq empty migu.json >/dev/null 2>&1; then
+            echo "✅ JSON validation passed"
+            echo "Total channels: $(jq 'length' migu.json)"
+          else
+            echo "❌ JSON validation failed"
+            exit 1
+          fi
+
+      - name: Show sample
+        run: |
+          echo "Sample of first 3 channels:"
+          jq 'to_entries | .[0:3] | from_entries' migu.json
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add migu.json
           
-          # 清理
-          rm -f interface.txt
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            echo "Changes detected, committing..."
+            NOW=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+            git commit -m "🔄 Auto update migu.json [$NOW]"
+            git push origin main
+            echo "Changes pushed successfully"
+          fi
+
+      - name: Clean up
+        run: rm -f interface.txt
