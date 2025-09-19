@@ -21,27 +21,28 @@ jobs:
             echo "Failed to download interface.txt"
             exit 1
           fi
-          echo "Downloaded interface.txt successfully"
 
       - name: Install jq
         run: sudo apt-get install -y jq
 
       - name: Convert M3U to JSON
         run: |
-          echo "Starting conversion..."
           echo "{" > migu.json
           first_entry=true
           current_name=""
-
+          
           while IFS= read -r line; do
+            # Skip header lines
             if [[ "$line" == "#EXTM3U"* ]]; then
               continue
             fi
-
+            
+            # Extract channel name
             if [[ "$line" == "#EXTINF:"* ]] && [[ "$line" == *"svg-name="* ]]; then
               current_name=$(echo "$line" | grep -o 'svg-name="[^"]*"' | cut -d'"' -f2)
             fi
-
+            
+            # Extract URL and write to JSON
             if [[ "$line" == http* ]] && [[ -n "$current_name" ]]; then
               if [ "$first_entry" = false ]; then
                 echo "," >> migu.json
@@ -52,9 +53,8 @@ jobs:
               current_name=""
             fi
           done < interface.txt
-
+          
           echo "}" >> migu.json
-          echo "Conversion completed"
 
       - name: Validate JSON
         run: |
@@ -72,7 +72,7 @@ jobs:
           git config user.email "github-actions@github.com"
           git add migu.json
           if ! git diff --cached --quiet; then
-            NOW=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+            NOW=$(date '+%Y-%m-%d %H:%M:%S')
             git commit -m "Update migu.json [$NOW]"
             git push origin main
           else
