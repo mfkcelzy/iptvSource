@@ -1,0 +1,76 @@
+name: Sync from Github Migu Video Files
+
+on:
+  schedule:
+    - cron: "0 * * * *"   # 每小时执行一次（UTC 时间，换算北京要+8）
+  workflow_dispatch:       # 手动触发
+
+jobs:
+  sync-migu:
+    runs-on: ubuntu-latest
+    steps:
+      # 1️⃣ 检出 GitHub 仓库
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+          fetch-depth: 0
+
+      # 2️⃣ 安装依赖
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq xmlstarlet
+
+      # 3️⃣ 下载并处理 interface.txt → migu.json
+      - name: Process interface.txt to migu.json
+        run: |
+          curl -sL "https://raw.githubusercontent.com/develop202/migu_video/refs/heads/main/interface.txt" -o interface.txt
+
+          # 解析 M3U，跳过 #EXTM3U 和 #EXTINF 以外的无用内容
+          awk -F '"' '
+            /^#EXTINF/ {
+              for(i=1;i<=NF;i++){
+                if($i ~ /^svg-name=/){
+                  name=$(i+1)   # svg-name="CCTV1综合"
+                }
+              }
+              getline url
+              gsub(/\r$/,"",url)
+              printf("\"%s\": \"%s\",\n", name, url)
+            }
+          ' interface.txt | sed '$ s/,$//' | awk 'BEGIN{print "{"} {print} END{print "}"}' > migu.json
+
+          echo "Generated migu.json:"
+          cat migu.json
+
+      # 4️⃣ 下载并处理 playback.xml → miguepg.xml
+      - name: Process playback.xml to miguepg.xml
+        run: |
+          curl -sL "https://raw.githubusercontent.com/develop202/migu_video/refs/heads/main/playback.xml" -o miguepg.xml
+
+          # 替换 <tv ...> 标签属性
+          sed -i 's#<tv generator-info-name="Tak" generator-info-url="https://github.com/develop202/migu_video/">#<tv generator-info-name="Migu" generator-info-url="https://mytveo.hxfkof.ggff.net/?proxy=true">#' miguepg.xml
+
+          echo "Updated miguepg.xml:"
+          head -n 5 miguepg.xml
+
+      # 5️⃣ 检查文件是否有变化
+      - name: Check for changes
+        id: check_changes
+        run: |
+          git add migu.json miguepg.xml
+          if git diff --staged --quiet; then
+            echo "changes=false" >> $GITHUB_OUTPUT
+            echo "No changes detected"
+          else
+            echo "changes=true" >> $GITHUB_OUTPUT
+            echo "Changes detected"
+          fi
+
+      # 6️⃣ 提交并 push
+      - name: Commit and push changes
+        if: steps.check_changes.outputs.changes == 'true'
+        run: |
+          git commit -m "chore: sync migu files [$(date +'%Y-%m-%d %H:%M')]"
+          git push
