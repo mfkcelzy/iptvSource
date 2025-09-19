@@ -19,11 +19,13 @@ jobs:
       # 2️⃣ 下载 interface.txt
       - name: Download interface.txt
         run: |
-          curl -sSL -o interface.txt https://raw.githubusercontent.com/develop202/migu_video/refs/heads/main/interface.txt
+          curl -sSL -o interface.txt https://raw.githubusercontent.com/develop202/migu_video/main/interface.txt
           if [ ! -s interface.txt ]; then
             echo "Failed to download interface.txt"
             exit 1
           fi
+          # 查看文件前几行以调试
+          head -5 interface.txt
 
       # 3️⃣ 解析 M3U 并生成 migu.json
       - name: Convert M3U to JSON
@@ -36,25 +38,32 @@ json_file = "migu.json"
 
 channels = {}
 with open(m3u_file, "r", encoding="utf-8") as f:
-    lines = f.readlines()
+    content = f.read()
 
-name = None
-for line in lines:
-    line = line.strip()
-    if line.startswith("#EXTINF:"):
-        match = re.search(r'svg-name="([^"]+)"', line)
-        if match:
-            name = match.group(1)
-    elif line and not line.startswith("#"):
-        if name:
-            channels[name] = line
-            name = None
+# 更通用的 M3U 解析
+pattern = r'#EXTINF:-1\s*(?:.*?)?,(.*?)\n(https?://[^\s]+)'
+matches = re.findall(pattern, content, re.MULTILINE)
 
+for name, url in matches:
+    # 清理频道名称
+    name = re.sub(r'tvg-name="[^"]*"', '', name).strip()
+    name = re.sub(r'tvg-logo="[^"]*"', '', name).strip()
+    name = name.strip('"').strip()
+    if name and url:
+        channels[name] = url
+
+print(f"Found {len(channels)} channels")
 with open(json_file, "w", encoding="utf-8") as f:
     json.dump(channels, f, ensure_ascii=False, indent=2)
 EOF
 
-      # 4️⃣ 提交并 push 到 GitHub（仅当文件有变化时）
+      # 4️⃣ 查看生成的 JSON 内容（用于调试）
+      - name: Check generated JSON
+        run: |
+          head -10 migu.json
+          echo "Total channels: $(jq length migu.json)"
+
+      # 5️⃣ 提交并 push 到 GitHub（仅当文件有变化时）
       - name: Commit & Push changes
         run: |
           git config user.name "github-actions"
@@ -63,6 +72,6 @@ EOF
           if ! git diff --cached --quiet; then
             NOW=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
             git commit -m "Update migu.json from interface.txt [$NOW]"
-            git push https://x-access-token:${{ secrets.GH_PAT }}@github.com/hxfkofoutlook/iptv.git main
+            git push origin main
           else
             echo "No changes to commit"
