@@ -1,4 +1,4 @@
-name: Sync Gitee Migu JSON
+name: Sync Github Migu JSON
 
 on:
   schedule:
