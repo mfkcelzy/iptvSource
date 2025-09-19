@@ -2,21 +2,19 @@ name: Sync Github MiguJSON
 
 on:
   schedule:
-    - cron: '0 * * * *' # 每小时 UTC，整点执行
+    - cron: '0 */2 * * *' # 每 2 小时 UTC 执行一次
   workflow_dispatch:
 
 jobs:
   sync-migu-json:
     runs-on: ubuntu-latest
     steps:
-      # 1️⃣ 检出 GitHub 仓库
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GH_PAT }}
           fetch-depth: 0
 
-      # 2️⃣ 下载 interface.txt
       - name: Download interface.txt
         run: |
           curl -sSL -o interface.txt https://raw.githubusercontent.com/develop202/migu_video/refs/heads/main/interface.txt
@@ -25,10 +23,9 @@ jobs:
             exit 1
           fi
 
-      # 3️⃣ 解析 M3U 并生成 migu.json
       - name: Convert M3U to JSON
         run: |
-          python3 - << 'EOF'
+python3 - << 'EOF'
 import re, json
 
 m3u_file = "interface.txt"
@@ -42,12 +39,10 @@ name = None
 for line in lines:
     line = line.strip()
     if line.startswith("#EXTINF:"):
-        # 匹配 svg-name="XXX"
         match = re.search(r'svg-name="([^"]+)"', line)
         if match:
             name = match.group(1)
     elif line and not line.startswith("#"):
-        # URL 行
         if name:
             channels[name] = line
             name = None
@@ -56,7 +51,6 @@ with open(json_file, "w", encoding="utf-8") as f:
     json.dump(channels, f, ensure_ascii=False, indent=2)
 EOF
 
-      # 4️⃣ 提交并 push 到 GitHub（仅当有变化时）
       - name: Commit & Push changes
         run: |
           git config user.name "github-actions"
