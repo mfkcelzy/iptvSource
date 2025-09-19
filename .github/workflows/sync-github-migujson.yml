@@ -2,111 +2,64 @@ name: Sync Migu JSON Hourly
 
 on:
   schedule:
-    - cron: '0 * * * *'  # 每小时运行一次
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 jobs:
   update-migu-json:
     runs-on: ubuntu-latest
     steps:
-      # 1️⃣ 检出 GitHub 仓库
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GH_PAT }}
-          fetch-depth: 0
 
-      # 2️⃣ 下载 interface.txt
-      - name: Download interface.txt
+      - name: Download and process
         run: |
+          # 下载文件
           curl -sSL -o interface.txt "https://raw.githubusercontent.com/develop202/migu_video/refs/heads/main/interface.txt"
-          if [ ! -s interface.txt ]; then
-            echo "Failed to download interface.txt"
+          
+          # 处理文件并生成 JSON
+          echo "{" > migu.json
+          first=true
+          while IFS= read -r line; do
+            # 提取 svg-name
+            if [[ $line == *"svg-name="* ]]; then
+              name=$(echo "$line" | grep -o 'svg-name="[^"]*"' | cut -d'"' -f2)
+            fi
+            # 提取 URL
+            if [[ $line == http* ]]; then
+              if [ ! -z "$name" ]; then
+                if [ "$first" = false ]; then
+                  echo "," >> migu.json
+                fi
+                echo "  \"$name\": \"$line\"" >> migu.json
+                first=false
+                name=""
+              fi
+            fi
+          done < interface.txt
+          echo "}" >> migu.json
+
+      - name: Validate and commit
+        run: |
+          # 安装 jq 验证 JSON
+          sudo apt-get install -y jq
+          
+          # 验证 JSON
+          if jq empty migu.json; then
+            echo "JSON 验证成功"
+            git config user.name "github-actions"
+            git config user.email "github-actions@github.com"
+            git add migu.json
+            if ! git diff --cached --quiet; then
+              git commit -m "Update migu.json $(date '+%Y-%m-%d %H:%M:%S')"
+              git push origin main
+            fi
+          else
+            echo "JSON 验证失败"
             exit 1
           fi
-          echo "Downloaded interface.txt successfully"
-          head -3 interface.txt
-
-      # 3️⃣ 创建 Python 脚本文件
-      - name: Create Python script
-        run: |
-          cat > convert_m3u_to_json.py << 'EOL'
-import re
-import json
-
-# 读取 M3U 文件
-with open('interface.txt', 'r', encoding='utf-8') as f:
-    lines = f.readlines()
-
-channels = {}
-current_name = None
-
-for line in lines:
-    line = line.strip()
-    
-    # 跳过 M3U 头信息和空行
-    if line.startswith('#EXTM3U') or not line:
-        continue
-    
-    # 解析频道信息行
-    if line.startswith('#EXTINF:'):
-        # 使用正则表达式提取 svg-name
-        name_match = re.search(r'svg-name="([^"]+)"', line)
-        if name_match:
-            current_name = name_match.group(1)
-        else:
-            # 如果找不到 svg-name，尝试从频道名称部分提取
-            name_match = re.search(r',([^,]+)$', line)
-            if name_match:
-                current_name = name_match.group(1).strip()
-    
-    # 解析 URL 行
-    elif line.startswith('http'):
-        if current_name:
-            channels[current_name] = line
-            current_name = None
-
-print(f"成功解析 {len(channels)} 个频道")
-
-# 保存为 JSON 文件
-with open('migu.json', 'w', encoding='utf-8') as f:
-    json.dump(channels, f, ensure_ascii=False, indent=2)
-
-print("migu.json 文件已生成")
-EOL
-
-      # 4️⃣ 运行 Python 脚本
-      - name: Convert M3U to JSON
-        run: python3 convert_m3u_to_json.py
-
-      # 5️⃣ 验证生成的 JSON 文件
-      - name: Validate JSON
-        run: |
-          echo "生成的 JSON 文件前几个频道:"
-          head -10 migu.json
-          echo "总频道数: $(jq 'length' migu.json)"
-          echo "示例频道:"
-          jq 'to_entries | .[0:2] | from_entries' migu.json
-
-      # 6️⃣ 提交并推送更改
-      - name: Commit and Push
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add migu.json
           
-          if git diff --cached --quiet; then
-            echo "没有变化需要提交"
-          else
-            echo "检测到变化，提交并推送"
-            NOW=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
-            git commit -m "🔄 自动更新 migu.json [$NOW]"
-            git push origin main
-            echo "更改已推送"
-          fi
-
-      # 7️⃣ 清理临时文件
-      - name: Clean up
-        run: |
-          rm -f interface.txt convert_m3u_to_json.py
-          echo "临时文件已清理"
+          # 清理
+          rm -f interface.txt
