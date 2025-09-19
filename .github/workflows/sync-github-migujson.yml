@@ -30,7 +30,7 @@ jobs:
       # 3️⃣ 解析 M3U 并生成 migu.json
       - name: Convert M3U to JSON
         run: |
-          python3 - <<'EOF'
+          python3 << 'EOF'
 import re, json
 
 m3u_file = "interface.txt"
