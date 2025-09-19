@@ -2,7 +2,7 @@ name: Sync Migu JSON Hourly
 
 on:
   schedule:
-    - cron: '0 * * * *' # 每小时运行一次
+    - cron: '0 * * * *'  # 每小时运行一次
   workflow_dispatch:
 
 jobs:
@@ -25,13 +25,12 @@ jobs:
             exit 1
           fi
           echo "Downloaded interface.txt successfully"
-          echo "First few lines:"
           head -3 interface.txt
 
-      # 3️⃣ 解析 M3U 并生成 migu.json
-      - name: Convert M3U to JSON
+      # 3️⃣ 创建 Python 脚本文件
+      - name: Create Python script
         run: |
-          python3 << 'EOF'
+          cat > convert_m3u_to_json.py << 'EOL'
 import re
 import json
 
@@ -64,10 +63,7 @@ for line in lines:
     # 解析 URL 行
     elif line.startswith('http'):
         if current_name:
-            # 清理 URL（移除可能的时间戳参数）
-            url = re.sub(r'(&?timestamp=\d+)', '', line)
-            url = re.sub(r'(&?SecurityKey=\d+)', '', url)
-            channels[current_name] = url
+            channels[current_name] = line
             current_name = None
 
 print(f"成功解析 {len(channels)} 个频道")
@@ -77,9 +73,13 @@ with open('migu.json', 'w', encoding='utf-8') as f:
     json.dump(channels, f, ensure_ascii=False, indent=2)
 
 print("migu.json 文件已生成")
-EOF
+EOL
 
-      # 4️⃣ 验证生成的 JSON 文件
+      # 4️⃣ 运行 Python 脚本
+      - name: Convert M3U to JSON
+        run: python3 convert_m3u_to_json.py
+
+      # 5️⃣ 验证生成的 JSON 文件
       - name: Validate JSON
         run: |
           echo "生成的 JSON 文件前几个频道:"
@@ -88,7 +88,7 @@ EOF
           echo "示例频道:"
           jq 'to_entries | .[0:2] | from_entries' migu.json
 
-      # 5️⃣ 提交并推送更改
+      # 6️⃣ 提交并推送更改
       - name: Commit and Push
         run: |
           git config user.name "github-actions"
@@ -99,15 +99,14 @@ EOF
             echo "没有变化需要提交"
           else
             echo "检测到变化，提交并推送"
-            git status
             NOW=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
             git commit -m "🔄 自动更新 migu.json [$NOW]"
             git push origin main
             echo "更改已推送"
           fi
 
-      # 6️⃣ 清理临时文件
+      # 7️⃣ 清理临时文件
       - name: Clean up
         run: |
-          rm -f interface.txt
+          rm -f interface.txt convert_m3u_to_json.py
           echo "临时文件已清理"
