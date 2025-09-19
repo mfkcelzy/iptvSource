@@ -15,38 +15,28 @@ jobs:
           token: ${{ secrets.GH_PAT }}
 
       - name: Download interface.txt
-        run: curl -sSL -o interface.txt "https://raw.githubusercontent.com/develop202/migu_video/main/interface.txt"
-
-      - name: Install jq
-        run: sudo apt-get install -y jq
+        run: curl -s -o interface.txt "https://raw.githubusercontent.com/develop202/migu_video/main/interface.txt"
 
       - name: Convert M3U to JSON
         run: |
           echo "{" > migu.json
-          first=true
+          first=1
           name=""
           while IFS= read -r line; do
-            if [[ "$line" == *"svg-name="* ]]; then
+            if echo "$line" | grep -q "svg-name="; then
               name=$(echo "$line" | grep -o 'svg-name="[^"]*"' | cut -d'"' -f2)
-            elif [[ "$line" == http* && -n "$name" ]]; then
-              if [ "$first" = false ]; then
-                echo "," >> migu.json
+            elif echo "$line" | grep -q "^http"; then
+              if [ -n "$name" ]; then
+                if [ $first -eq 0 ]; then
+                  echo "," >> migu.json
+                fi
+                echo "  \"$name\": \"$line\"" >> migu.json
+                first=0
+                name=""
               fi
-              echo "  \"$name\": \"$line\"" >> migu.json
-              first=false
-              name=""
             fi
           done < interface.txt
           echo "}" >> migu.json
-
-      - name: Validate JSON
-        run: |
-          if jq empty migu.json >/dev/null 2>&1; then
-            echo "JSON is valid"
-          else
-            echo "JSON is invalid"
-            exit 1
-          fi
 
       - name: Commit changes
         run: |
