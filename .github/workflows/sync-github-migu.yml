@@ -1,0 +1,70 @@
+name: Sync Gitee Migu JSON
+
+on:
+  schedule:
+    - cron: '0 * * * *' # 每小时 UTC，整点执行
+  workflow_dispatch:
+
+jobs:
+  sync-migu-json:
+    runs-on: ubuntu-latest
+    steps:
+      # 1️⃣ 检出 GitHub 仓库
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+          fetch-depth: 0
+
+      # 2️⃣ 下载 interface.txt
+      - name: Download interface.txt
+        run: |
+          curl -sSL -o interface.txt https://raw.githubusercontent.com/develop202/migu_video/refs/heads/main/interface.txt
+          if [ ! -s interface.txt ]; then
+            echo "Failed to download interface.txt"
+            exit 1
+          fi
+
+      # 3️⃣ 解析 M3U 并生成 migu.json
+      - name: Convert M3U to JSON
+        run: |
+          python3 - << 'EOF'
+import re, json
+
+m3u_file = "interface.txt"
+json_file = "migu.json"
+
+channels = {}
+with open(m3u_file, "r", encoding="utf-8") as f:
+    lines = f.readlines()
+
+name = None
+for line in lines:
+    line = line.strip()
+    if line.startswith("#EXTINF:"):
+        # 匹配 svg-name="XXX"
+        match = re.search(r'svg-name="([^"]+)"', line)
+        if match:
+            name = match.group(1)
+    elif line and not line.startswith("#"):
+        # URL 行
+        if name:
+            channels[name] = line
+            name = None
+
+with open(json_file, "w", encoding="utf-8") as f:
+    json.dump(channels, f, ensure_ascii=False, indent=2)
+EOF
+
+      # 4️⃣ 提交并 push 到 GitHub（仅当有变化时）
+      - name: Commit & Push changes
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add migu.json
+          if ! git diff --cached --quiet; then
+            NOW=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S')
+            git commit -m "Update migu.json from interface.txt [$NOW]"
+            git push https://x-access-token:${{ secrets.GH_PAT }}@github.com/hxfkofoutlook/iptv.git main
+          else
+            echo "No changes to commit"
